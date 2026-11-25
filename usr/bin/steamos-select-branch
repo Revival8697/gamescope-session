@@ -1,23 +1,65 @@
 #!/bin/bash
 
-set -e
+set -euo pipefail
 
-os_name="$(grep '^NAME=' /etc/os-release 2>/dev/null | cut -d= -f2- | tr -d '"')"
+readonly CHANNEL_FILE=${HOLO_UPDATE_CHANNEL_FILE:-/var/lib/holo-update/channel}
+readonly UPDATE_CHANNEL="CachyOS Linux"
 
-if [[ $# -eq 1 ]]; then
-  case "$1" in
-    -c|-l)
-      echo "$os_name"
-      exit 0
-      ;;
-    stable)
-      exit 0
-      ;;
-    *)
-      echo "Invalid option. Usage: steamos-select-branch <stable|-c|-l>" 1>&2
-      exit 1
-      ;;
-  esac
+# Default channel when CHANNEL_FILE does not exist yet
+readonly DEFAULT_CHANNEL="None"
+
+read_channel() {
+    local current=""
+    if [[ -r "$CHANNEL_FILE" ]]; then
+        IFS= read -r current < "$CHANNEL_FILE" || true
+    fi
+    if [[ "$current" == "None" || "$current" == "$UPDATE_CHANNEL" ]]; then
+        printf '%s\n' "$current"
+    else
+        printf '%s\n' "$DEFAULT_CHANNEL"
+    fi
+}
+
+write_channel() {
+    local target="$1"
+    if (( EUID != 0 )); then
+        echo "steamos-select-branch: must be run as root to change channel" >&2
+        exit 1
+    fi
+    mkdir -p "$(dirname "$CHANNEL_FILE")"
+    printf '%s\n' "$target" > "${CHANNEL_FILE}.tmp"
+    mv -f "${CHANNEL_FILE}.tmp" "$CHANNEL_FILE"
+}
+
+if (( $# == 0 )); then
+    echo "Usage: steamos-select-branch <-c|-l|None|${UPDATE_CHANNEL}>" >&2
+    exit 1
 fi
 
-echo "Usage: steamos-select-branch <stable|-c|-l>" 1>&2
+case "$1" in
+    -c)
+        read_channel
+        exit 0
+        ;;
+    -l)
+        printf '%s\n' "None" "$UPDATE_CHANNEL"
+        exit 0
+        ;;
+esac
+
+branch="$*"
+
+case "$branch" in
+    None)
+        write_channel "None"
+        exit 0
+        ;;
+    "$UPDATE_CHANNEL"|stable|rel)
+        write_channel "$UPDATE_CHANNEL"
+        exit 0
+        ;;
+    *)
+        echo "Invalid branch: $branch. Valid options: None, ${UPDATE_CHANNEL}" >&2
+        exit 1
+        ;;
+esac

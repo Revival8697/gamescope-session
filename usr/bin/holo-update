@@ -25,6 +25,17 @@ readonly STATE_DIR=${HOLO_UPDATE_STATE_DIR:-/run/holo-update}
 readonly LOG=${HOLO_UPDATE_LOG:-/var/log/holo-update.log}
 readonly MIN_BATTERY=${HOLO_UPDATE_MIN_BATTERY:-30}
 readonly EXIT_NO_UPDATE=7
+readonly CHANNEL_FILE=${HOLO_UPDATE_CHANNEL_FILE:-/var/lib/holo-update/channel}
+
+updates_enabled() {
+    local channel=""
+    if [[ -r "$CHANNEL_FILE" ]]; then
+        IFS= read -r channel < "$CHANNEL_FILE" || true
+    else
+        channel=$(steamos-select-branch -c 2>/dev/null || echo "None")
+    fi
+    [[ -n "$channel" && "$channel" != "None" ]]
+}
 
 log() { logger -t holo-update -- "$*"; echo "holo-update: $*" >&2; }
 
@@ -87,6 +98,9 @@ on_battery_below() {
 do_check() {
     if update_running; then
         exit 0 # let Steam offer the update, applying it attaches to the running one
+    fi
+    if ! updates_enabled; then
+        exit "$EXIT_NO_UPDATE"
     fi
     if [[ -e $STATE_DIR/reboot-required ]]; then
         exit "$EXIT_NO_UPDATE" # already installed, waiting for a restart
@@ -212,6 +226,9 @@ fi
 mkdir -p "$STATE_DIR"
 exec {start_lock}> "$STATE_DIR/start.lock"
 flock "$start_lock"
-update_running || start_update
+if ! update_running; then
+    updates_enabled || exit "$EXIT_NO_UPDATE"
+    start_update
+fi
 exec {start_lock}>&-
 follow_update
